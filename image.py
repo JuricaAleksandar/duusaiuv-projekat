@@ -13,23 +13,26 @@ num_classes = 80                    # Broj klasa nad kojima je mreža trenirana
 class_name = './data/coco.names'    # Putanja do datoteke koja sadrži imena klasa
 max_output_size = 40                # Najveći broj okvira koje želimo da dobijemo za sve klase ukupno
 max_output_size_per_class= 20       # Najveći broj okvira koje želimo da dobijemo po klasi
-iou_threshold = 0.3                 # Prag mere preklapanja dva okvira
-confidence_threshold = 0.7          # Prag pouzdanosti prisustva objekta 
+iou_threshold = 0.6                 # Prag mere preklapanja dva okvira
+confidence_threshold = 0.55          # Prag pouzdanosti prisustva objekta 
 
 cfgfile = './cfg/yolov3.cfg'                  # Putanja do YOLO v3 konfiguracione datoteke
 weightfile = './weights/yolov3_weights.tf'    # Putanja do datoteke koja sadrži istrenirane koeficijente u TensorFlow formatu
 left_img_path = "./DrivingStereo_demo_images/image_L"
 right_img_path = "./DrivingStereo_demo_images/image_R"
+output_path = './out/'
 
 focal_length = 0.00754
 camera_distance = 0.54
 pitch = 0.00000586
 
-def pretprocessing(model, img_path):
+y_threshold = 25
+
+def preprocess_and_detect(model, img_path):
     img = cv2.imread(img_path)
     img = np.array(img)
     img = tf.expand_dims(img, 0) # Dodavanje još jedne dimenzije, jer je ulaz definsian kao batch slika
-    resized_img = resize_image(img, (model_size[0],model_size[1]))
+    resized_img = resize_image(img, (model_size[0], model_size[1]))
 
     # Inferencija nad ulaznom slikom
     # izlazne predikcije pred - skup vektora (10647), gde svaki odgovara jednom okviru lokacije objekta 
@@ -42,12 +45,14 @@ def pretprocessing(model, img_path):
         max_output_size_per_class=max_output_size_per_class,
         iou_threshold=iou_threshold,
         confidence_threshold=confidence_threshold)
-    list_of_x = list()
+
+    obj_pos = []
     for box in np.array(boxes[0]):
-        x = (box[2] + box[0])/2
-        if x != 0:
-            list_of_x.append(x)
-    return boxes, scores, classes, nums, img, list_of_x
+        y = (box[3] + box[1])/2*1200
+        x = (box[2] + box[0])/2*1920
+        obj_pos.append((x, y))
+
+    return np.array(boxes[0]), np.array(scores[0]), np.array(classes[0]), np.array(nums[0]), img, obj_pos
 
 
 def main():
@@ -58,67 +63,55 @@ def main():
     # Učitavanje imena klasa
     class_names = load_class_names(class_name)
     
+    old_images = os.listdir(output_path)
+    for img in old_images:
+        os.remove(os.path.join(output_path, img))
     # Učitavanje ulazne slike i predobrada u format koji očekuje model
     img_names = os.listdir(left_img_path)
-    for path_to_image in img_names:
-        boxes_l , scores_l, left_classes, nums_l, left_img, list_of_left_x = pretprocessing(model, os.path.join(left_img_path, path_to_image))
-        boxes_r, scores_r, right_classes, nums_r, right_img, list_of_right_x = pretprocessing(model, os.path.join(right_img_path, path_to_image))
-        if list_of_left_x and list_of_right_x:
-            # Uklanja dimenzije veličine 1, npr. (28, 28, 3, 1) ->  (28, 28, 3)
-            left_image = np.squeeze(left_img) 
-            out_img_l = draw_outputs(left_image, boxes_l, scores_l, left_classes, nums_l, class_names)
+    for name in img_names:
+        boxes_l , scores_l, left_classes, nums_l, left_img, left_obj_pos = preprocess_and_detect(model, os.path.join(left_img_path, name))
+        _, _, right_classes, nums_r, _, right_obj_pos = preprocess_and_detect(model, os.path.join(right_img_path, name))
+        print('\nDetektovano:')
+        print(nums_l)
+        print(nums_r)
+        print(left_obj_pos[:nums_l])
+        print(right_obj_pos[:nums_r])
+        print(left_classes[:nums_l])
+        print(right_classes[:nums_r]) 
 
-            # Uklanja dimenzije veličine 1, npr. (28, 28, 3, 1) ->  (28, 28, 3)
-            right_image = np.squeeze(right_img) 
-            out_img_r = draw_outputs(right_image, boxes_r, scores_r, right_classes, nums_r, class_names)
+        valid_boxes = []
+        valid_scores = []
+        valid_classes = []
+        valid_nums = 0
+        distances = []
 
-            # Čuvanje rezultata u datoteku
-            out_file_name_l = './out/{}L.png'.format(path_to_image[:-4])
-            cv2.imwrite(out_file_name_l, out_img_l)
+        if (nums_l > 0 and nums_r > 0):
+            for l_obj_ind in range(nums_l):
+                for r_obj_ind in range(nums_r):
+                    if left_classes[l_obj_ind] == right_classes[r_obj_ind] and abs(left_obj_pos[l_obj_ind][1] - right_obj_pos[r_obj_ind][1]) < y_threshold:
+                        pixel_dx = abs(left_obj_pos[l_obj_ind][0] - right_obj_pos[r_obj_ind][0])
+                        dx = pixel_dx * pitch
+                        distance = (camera_distance * focal_length) / dx
+                        valid_boxes.append(boxes_l[l_obj_ind])
+                        valid_scores.append(scores_l[l_obj_ind])
+                        valid_classes.append(left_classes[l_obj_ind])
+                        distances.append(distance)
+                        valid_nums += 1
 
-            # Čuvanje rezultata u datoteku
-            out_file_name_r = './out/{}R.png'.format(path_to_image[:-4])
-            cv2.imwrite(out_file_name_r, out_img_r)
+        print('\nValidno:')
+        print(valid_boxes)
+        print(valid_scores)
+        print(valid_classes)
+        print(valid_nums)
+        print(distances)
 
-            # left_image = cv2.imread(os.path.join(right_img_path, right_img_names[4]))
-            # left_image = np.array(left_image)
-            # left_image = tf.expand_dims(left_image, 0) # Dodavanje još jedne dimenzije, jer je ulaz definsian kao batch slika
-            # resized_left_image = resize_image(left_image, (model_size[0],model_size[1]))
+        # Uklanja dimenzije veličine 1, npr. (28, 28, 3, 1) ->  (28, 28, 3)
+        left_img = np.squeeze(left_img) 
+        out_img = draw_outputs(left_img, valid_boxes, valid_scores, valid_classes, valid_nums, class_names, distances)
 
-            # # Inferencija nad ulaznom slikom
-            # # izlazne predikcije pred - skup vektora (10647), gde svaki odgovara jednom okviru lokacije objekta 
-            # pred = model.predict(resized_left_image)
-
-            # # Određivanje okvira oko detektovanih objekata (za određene pragove)
-            # boxes, scores, classes, nums = output_boxes( \
-            #     pred, model_size,
-            #     max_output_size=max_output_size,
-            #     max_output_size_per_class=max_output_size_per_class,
-            #     iou_threshold=iou_threshold,
-            #     confidence_threshold=confidence_threshold)
-            
-            min_num_classes = min(nums_l[0], nums_r[0])
-            # caci = nums_l[0] < nums_r[0]
-            # print(list_of_left_x[:min_num_classes], list_of_right_x[:min_num_classes])
-
-            for index, (left_x, right_x) in enumerate(zip(list_of_left_x[:min_num_classes], list_of_right_x[:min_num_classes])):
-                if left_classes[0][index] == right_classes[0][index]:
-                    pixel_dx = left_x - right_x
-                    dx = pixel_dx * pitch * 1920
-                    distance = (camera_distance * focal_length) / dx
-                    if distance < 0:
-                        # print(out_file_name)
-                        print("left class:{} num of left {}\n".format(left_classes, nums_l[0]))
-                        print("right class:{} num of right {}\n".format(right_classes, nums_r[0]))
-                        print(distance)
-
-            # # Uklanja dimenzije veličine 1, npr. (28, 28, 3, 1) ->  (28, 28, 3)
-            # left_image = np.squeeze(left_image) 
-            # out_img = draw_outputs(left_image, boxes, scores, classes, nums, class_names)
-
-            # # Čuvanje rezultata u datoteku
-            # out_file_name = './out/desna.png'
-            # cv2.imwrite(out_file_name, out_img)
+        # Čuvanje rezultata u datoteku
+        out_file_name = output_path + name
+        cv2.imwrite(out_file_name, out_img)
 
 if __name__ == '__main__':
     main()
