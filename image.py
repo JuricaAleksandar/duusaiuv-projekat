@@ -3,7 +3,7 @@
 
 import os
 import tensorflow as tf
-from utils import load_class_names, output_boxes, draw_outputs, resize_image
+from utils import load_class_names, output_boxes, draw_outputs, draw_outputs_with_distance, resize_image
 import cv2
 import numpy as np
 from yolov3 import YOLOv3Net
@@ -13,8 +13,8 @@ num_classes = 80                    # Broj klasa nad kojima je mreža trenirana
 class_name = './data/coco.names'    # Putanja do datoteke koja sadrži imena klasa
 max_output_size = 40                # Najveći broj okvira koje želimo da dobijemo za sve klase ukupno
 max_output_size_per_class= 20       # Najveći broj okvira koje želimo da dobijemo po klasi
-iou_threshold = 0.6                 # Prag mere preklapanja dva okvira
-confidence_threshold = 0.55          # Prag pouzdanosti prisustva objekta 
+iou_threshold = 0.3                 # Prag mere preklapanja dva okvira
+confidence_threshold = 0.75         # Prag pouzdanosti prisustva objekta 
 
 cfgfile = './cfg/yolov3.cfg'                  # Putanja do YOLO v3 konfiguracione datoteke
 weightfile = './weights/yolov3_weights.tf'    # Putanja do datoteke koja sadrži istrenirane koeficijente u TensorFlow formatu
@@ -27,6 +27,7 @@ camera_distance = 0.54
 pitch = 0.00000586
 
 y_threshold = 25
+x_threshold = 150
 
 def preprocess_and_detect(model, img_path):
     img = cv2.imread(img_path)
@@ -68,9 +69,9 @@ def main():
         os.remove(os.path.join(output_path, img))
     # Učitavanje ulazne slike i predobrada u format koji očekuje model
     img_names = os.listdir(left_img_path)
-    for name in img_names:
+    for name in [img_names[225]]:
         boxes_l , scores_l, left_classes, nums_l, left_img, left_obj_pos = preprocess_and_detect(model, os.path.join(left_img_path, name))
-        _, _, right_classes, nums_r, _, right_obj_pos = preprocess_and_detect(model, os.path.join(right_img_path, name))
+        boxes_r, scores_r, right_classes, nums_r, right_img, right_obj_pos = preprocess_and_detect(model, os.path.join(right_img_path, name))
         print('\nDetektovano:')
         print(nums_l)
         print(nums_r)
@@ -85,18 +86,54 @@ def main():
         valid_nums = 0
         distances = []
 
+        # Uklanja dimenzije veličine 1, npr. (28, 28, 3, 1) ->  (28, 28, 3)
+        left_img = np.squeeze(left_img)
+        right_img = np.squeeze(right_img)
+        out_img = np.copy(left_img)
+
+        left_img = draw_outputs(left_img, boxes_l, scores_l, left_classes, nums_l, class_names)
+        right_img = draw_outputs(right_img, boxes_r, scores_r, right_classes, nums_r, class_names)
+
         if (nums_l > 0 and nums_r > 0):
             for l_obj_ind in range(nums_l):
+                y_diff_list = []
+                ind_list = []
+
                 for r_obj_ind in range(nums_r):
-                    if left_classes[l_obj_ind] == right_classes[r_obj_ind] and abs(left_obj_pos[l_obj_ind][1] - right_obj_pos[r_obj_ind][1]) < y_threshold:
-                        pixel_dx = abs(left_obj_pos[l_obj_ind][0] - right_obj_pos[r_obj_ind][0])
-                        dx = pixel_dx * pitch
-                        distance = (camera_distance * focal_length) / dx
-                        valid_boxes.append(boxes_l[l_obj_ind])
-                        valid_scores.append(scores_l[l_obj_ind])
-                        valid_classes.append(left_classes[l_obj_ind])
-                        distances.append(distance)
-                        valid_nums += 1
+                    diff_y = abs(left_obj_pos[l_obj_ind][1] - right_obj_pos[r_obj_ind][1])
+                    diff_x = abs(left_obj_pos[l_obj_ind][0] - right_obj_pos[r_obj_ind][0])
+                    
+                    if left_classes[l_obj_ind] == right_classes[r_obj_ind] and diff_y < y_threshold:# and diff_x < x_threshold:
+                        y_diff_list.append(diff_y)
+                        ind_list.append(l_obj_ind)
+
+                print('Y DIFF LIST: {}'.format(y_diff_list))
+
+                if y_diff_list:
+
+                    nums_r -= 1
+                    min_y_diff = min(y_diff_list)
+                    min_y_diff_ind = ind_list[y_diff_list.index(min_y_diff)]
+
+                    pixel_dx = abs(left_obj_pos[l_obj_ind][0] - right_obj_pos[min_y_diff_ind][0])
+                    dx = pixel_dx * pitch
+                    distance = (camera_distance * focal_length) / dx
+
+                    valid_boxes.append(boxes_l[l_obj_ind])
+                    valid_scores.append(scores_l[l_obj_ind])
+                    valid_classes.append(left_classes[l_obj_ind])
+                    distances.append(distance)
+                    valid_nums += 1
+
+                    print('\nMATCHED: {}, {}'.format(l_obj_ind, min_y_diff_ind))
+                    print(left_obj_pos[:nums_l])
+                    print(right_obj_pos[:nums_r])
+                    print(left_classes[:nums_l])
+                    print(right_classes[:nums_r]) 
+
+                    right_classes = np.delete(right_classes, min_y_diff_ind, 0)
+                    right_obj_pos = np.delete(right_obj_pos, min_y_diff_ind, 0)
+                        
 
         print('\nValidno:')
         print(valid_boxes)
@@ -105,13 +142,14 @@ def main():
         print(valid_nums)
         print(distances)
 
-        # Uklanja dimenzije veličine 1, npr. (28, 28, 3, 1) ->  (28, 28, 3)
-        left_img = np.squeeze(left_img) 
-        out_img = draw_outputs(left_img, valid_boxes, valid_scores, valid_classes, valid_nums, class_names, distances)
+        out_img = draw_outputs_with_distance(out_img, valid_boxes, valid_scores, valid_classes, valid_nums, class_names, distances)
 
         # Čuvanje rezultata u datoteku
-        out_file_name = output_path + name
-        cv2.imwrite(out_file_name, out_img)
+        #out_file_name = output_path + name
+        #cv2.imwrite(out_file_name, out_img)
+        cv2.imwrite(output_path + 'L_' + name, left_img)
+        cv2.imwrite(output_path + 'R_' + name, right_img)
+        cv2.imwrite(output_path + 'OUT_' + name, out_img)
 
 if __name__ == '__main__':
     main()
