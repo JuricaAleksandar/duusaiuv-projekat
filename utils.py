@@ -4,6 +4,7 @@ import tensorflow as tf
 import numpy as np
 import cv2
 
+
 def resize_image(inputs, modelsize):
     #Skalira ulazne slike tako da odgovaraju veličini modela.
 
@@ -106,7 +107,8 @@ def output_boxes(inputs, model_size, max_output_size, max_output_size_per_class,
 
     return boxes_dicts
 
-def draw_outputs(img, boxes, objectness, classes, nums, class_names):
+
+def draw_outputs(img, boxes, objectness, classes, nums, class_names, distances=None):
     #Iscrtavanje detektovanih objekata na slici (pravougaonih, ime klase i verovatnoća)
 
     #Parametri:
@@ -126,48 +128,19 @@ def draw_outputs(img, boxes, objectness, classes, nums, class_names):
         x2y2 = tuple((boxes[i][2:4] * [img.shape[1],img.shape[0]]).astype(np.int32))
         x1y2 = tuple((boxes[i][0:4:3] * [img.shape[1],img.shape[0]]).astype(np.int32))
 
-        img = cv2.rectangle(img, (x1y1), (x2y2), (255,0,0), 2)
+        if distances is not None:
+            img = cv2.putText(img, '{:.2f}m'.format(
+                distances[i]), (x1y2), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
+
+            if distances[i] < 15:
+                img = cv2.rectangle(img, (x1y1), (x2y2), (0,0,255), 4)
+            else:
+                img = cv2.rectangle(img, (x1y1), (x2y2), (255,0,0), 2)
+        else:
+            img = cv2.rectangle(img, (x1y1), (x2y2), (255,0,0), 2)
 
         img = cv2.putText(img, '{} {:.4f}'.format(
             class_names[int(classes[i])], objectness[i]),
                           (x1y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
 
-        img = cv2.putText(img, 'Ind: {}'.format(str(i)), (x1y2), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
-        #img = cv2.putText(img, '{:.4f} {:.4f}'.format(boxes[i][0], boxes[i][2]), (x1y2 + (0, 40)), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
-
     return img
-
-def draw_outputs_with_distance(img, boxes, objectness, classes, nums, class_names, distances):
-    #Iscrtavanje detektovanih objekata na slici (pravougaonih, ime klase i verovatnoća)
-
-    #Parametri:
-    #    img: Slika
-    #    boxes: Okviri za iscrtavanje
-    #    objectness: Verovatnoća prisustva detektovanih objekta
-    #    classes: Klase detektovanih objekata
-    #    nums: Broj detektovanih objekata
-    #    class_names: Lista sa imenima klasa
-    #    distances : Lista sa udaljenostima objekata
-
-    #Povratna vrednost:
-    #    img: Izlazna slika
-
-    out_img = img
-
-    for i in range(nums):
-        x1y1 = tuple((boxes[i][0:2] * [img.shape[1],img.shape[0]]).astype(np.int32))
-        x2y2 = tuple((boxes[i][2:4] * [img.shape[1],img.shape[0]]).astype(np.int32))
-        x1y2 = tuple((boxes[i][0:4:3] * [img.shape[1],img.shape[0]]).astype(np.int32))
-
-        if distances[i] < 15:
-            out_img = cv2.rectangle(img, (x1y1), (x2y2), (0,0,255), 4)
-        else:
-            out_img = cv2.rectangle(img, (x1y1), (x2y2), (255,0,0), 2)
-
-        out_img = cv2.putText(out_img, '{} {:.4f}'.format(
-            class_names[int(classes[i])], objectness[i]),
-                          (x1y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
-
-        out_img = cv2.putText(out_img, '{:.2f}m'.format(
-            distances[i]), (x1y2), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
-    return out_img

@@ -3,7 +3,7 @@
 
 import os
 import tensorflow as tf
-from utils import load_class_names, output_boxes, draw_outputs, draw_outputs_with_distance, resize_image
+from utils import load_class_names, output_boxes, draw_outputs, resize_image
 import cv2
 import numpy as np
 from yolov3 import YOLOv3Net
@@ -26,11 +26,15 @@ focal_length = 0.00754
 camera_distance = 0.54
 pitch = 0.00000586
 
-y_threshold = 20
 h_threshold = 30
 x_threshold = 80
 
-def preprocess_and_detect(model, img_path):
+sensor_vertical_pixels = 1200
+sensor_horizontal_pixels = 1920
+
+
+def preprocess_and_detect(model, img_path):     
+    # Učitavanje ulazne slike i predobrada u format koji očekuje model
     img = cv2.imread(img_path)
     img = np.array(img)
     img = tf.expand_dims(img, 0) # Dodavanje još jedne dimenzije, jer je ulaz definsian kao batch slika
@@ -48,41 +52,68 @@ def preprocess_and_detect(model, img_path):
         iou_threshold=iou_threshold,
         confidence_threshold=confidence_threshold)
 
+    # Izdvajanje pozicije i visine objekta
     obj_pos = []
     obj_height = []
     for box in np.array(boxes[0]):
-        y = (box[3] + box[1])/2*1200
-        x = (box[2] + box[0])/2*1920
-        h = (box[3] - box[1])*1200
+        y = (box[3] + box[1])/2*sensor_vertical_pixels
+        x = (box[2] + box[0])/2*sensor_horizontal_pixels
+        h = (box[3] - box[1])*sensor_vertical_pixels
         obj_pos.append((x, y))
         obj_height.append(h)
 
+    # Uklanja dimenzije veličine 1, npr. (28, 28, 3, 1) ->  (28, 28, 3)
+    img = np.squeeze(img)
+
     return np.array(boxes[0]), np.array(scores[0]), np.array(classes[0]), np.array(nums[0]), img, obj_pos, obj_height
+
+
+def try_match(c1ass, pos, height, candidate_class, candidate_pos, candidate_height, candidate_num):
+    diff_y_list = []
+    ind_list = []
+    match_ind = None
+
+    for candidate_ind in range(candidate_num):
+        diff_y = abs(pos[1] - candidate_pos[candidate_ind][1])
+        diff_h = abs(height - candidate_height[candidate_ind])
+        diff_x = pos[0] - candidate_pos[candidate_ind][0]
+
+        if c1ass == candidate_class[candidate_ind] and diff_h < h_threshold and 0 < diff_x < x_threshold:
+            diff_y_list.append(diff_y)
+            ind_list.append(candidate_ind)
+
+    if diff_y_list:
+        diff_y_min = min(diff_y_list)
+        match_ind = ind_list[diff_y_list.index(diff_y_min)]
+
+    return match_ind
+
+
+def calculate_distance(left_obj_x, right_obj_x):
+    pixel_dx = left_obj_x - right_obj_x
+    dx = pixel_dx * pitch
+    return camera_distance * focal_length / dx
 
 
 def main():
     # Kreiranje modela
     model = YOLOv3Net(cfgfile, model_size, num_classes)
+
     # Učitavanje istreniranih koeficijenata u model
     model.load_weights(weightfile)
+
     # Učitavanje imena klasa
-    class_names = load_class_names(class_name)
-    
+    class_names = load_class_names(class_name) 
+
+    # Brisanje slika nastalih prilikome prethodnog pokretanja skripte
     old_images = os.listdir(output_path)
     for img in old_images:
         os.remove(os.path.join(output_path, img))
-    # Učitavanje ulazne slike i predobrada u format koji očekuje model
+
     img_names = os.listdir(left_img_path)
-    for name in img_names[270:299]:
-        boxes_l , scores_l, left_classes, nums_l, left_img, left_obj_pos, l_obj_height = preprocess_and_detect(model, os.path.join(left_img_path, name))
-        boxes_r, scores_r, right_classes, nums_r, right_img, right_obj_pos, r_obj_height = preprocess_and_detect(model, os.path.join(right_img_path, name))
-        print('\nDetektovano:')
-        print(nums_l)
-        print(nums_r)
-        print(left_obj_pos[:nums_l])
-        print(right_obj_pos[:nums_r])
-        print(left_classes[:nums_l])
-        print(right_classes[:nums_r]) 
+    for name in img_names:
+        l_boxes, l_scores, l_classes, l_nums, l_img, l_obj_pos, l_obj_height = preprocess_and_detect(model, os.path.join(left_img_path, name))
+        r_boxes, r_scores, r_classes, r_nums, r_img, r_obj_pos, r_obj_height = preprocess_and_detect(model, os.path.join(right_img_path, name))
 
         valid_boxes = []
         valid_scores = []
@@ -90,71 +121,43 @@ def main():
         valid_nums = 0
         distances = []
 
-        # Uklanja dimenzije veličine 1, npr. (28, 28, 3, 1) ->  (28, 28, 3)
-        left_img = np.squeeze(left_img)
-        right_img = np.squeeze(right_img)
-        out_img = np.copy(left_img)
+        # Stvaranje kopije slike sa leve kamere
+        out_img = np.copy(l_img)
 
-        left_img = draw_outputs(left_img, boxes_l, scores_l, left_classes, nums_l, class_names)
-        right_img = draw_outputs(right_img, boxes_r, scores_r, right_classes, nums_r, class_names)
+        #l_img = draw_outputs(l_img, l_boxes, l_scores, l_classes, l_nums, class_names)
+        #r_img = draw_outputs(r_img, r_boxes, r_scores, r_classes, r_nums, class_names)
 
-        if (nums_l > 0 and nums_r > 0):
-            for l_obj_ind in range(nums_l):
-                y_diff_list = []
-                ind_list = []
+        if (l_nums > 0 and r_nums > 0):
+            for l_obj_ind in range(l_nums):
+                match_ind = try_match(c1ass=l_classes[l_obj_ind],
+                                        pos=l_obj_pos[l_obj_ind],
+                                        height=l_obj_height[l_obj_ind],
+                                        candidate_class=r_classes,
+                                        candidate_pos=r_obj_pos,
+                                        candidate_height=r_obj_height,
+                                        candidate_num=r_nums)
 
-                for r_obj_ind in range(nums_r):
-                    diff_y = abs(left_obj_pos[l_obj_ind][1] - right_obj_pos[r_obj_ind][1])
-                    diff_h = abs(l_obj_height[l_obj_ind] - r_obj_height[r_obj_ind])
-                    diff_x = left_obj_pos[l_obj_ind][0] - right_obj_pos[r_obj_ind][0]
-
-                    if left_classes[l_obj_ind] == right_classes[r_obj_ind] and diff_y < y_threshold and diff_h < h_threshold and diff_x < x_threshold and diff_x > 0:
-                        y_diff_list.append(diff_y)
-                        ind_list.append(r_obj_ind)
-
-                print('Y DIFF LIST: {}'.format(y_diff_list))
-
-                if y_diff_list:
-
-                    min_y_diff = min(y_diff_list)
-                    min_y_diff_ind = ind_list[y_diff_list.index(min_y_diff)]
-
-                    pixel_dx = abs(left_obj_pos[l_obj_ind][0] - right_obj_pos[min_y_diff_ind][0])
-                    dx = pixel_dx * pitch
-                    distance = (camera_distance * focal_length) / dx
-
-                    valid_boxes.append(boxes_l[l_obj_ind])
-                    valid_scores.append(scores_l[l_obj_ind])
-                    valid_classes.append(left_classes[l_obj_ind])
-                    distances.append(distance)
+                if match_ind:
+                    # Dodavanje u listu uparenih objekata
+                    valid_boxes.append(l_boxes[l_obj_ind])
+                    valid_scores.append(l_scores[l_obj_ind])
+                    valid_classes.append(l_classes[l_obj_ind])
+                    distances.append(calculate_distance(l_obj_pos[l_obj_ind][0], r_obj_pos[match_ind][0]))
                     valid_nums += 1
 
-                    print('MATCHED: {}, {}'.format(l_obj_ind, min_y_diff_ind))
-                    print(left_obj_pos[:nums_l])
-                    print(right_obj_pos[:nums_r])
-                    print(left_classes[:nums_l])
-                    print(right_classes[:nums_r]) 
-                    print('\n#########################################################\n')
+                    # Brisanje uparenog objekta iz liste kandidata
+                    r_classes = np.delete(r_classes, match_ind, 0)
+                    r_obj_pos = np.delete(r_obj_pos, match_ind, 0)
+                    r_obj_height = np.delete(r_obj_height, match_ind, 0)
+                    r_nums -= 1
 
-                    right_classes = np.delete(right_classes, min_y_diff_ind, 0)
-                    right_obj_pos = np.delete(right_obj_pos, min_y_diff_ind, 0)
-                    r_obj_height = np.delete(r_obj_height, min_y_diff_ind, 0)
-                    nums_r -= 1
-                        
-
-        print('\nValidno:')
-        print(valid_boxes)
-        print(valid_scores)
-        print(valid_classes)
-        print(valid_nums)
-        print(distances)
-
-        out_img = draw_outputs_with_distance(out_img, valid_boxes, valid_scores, valid_classes, valid_nums, class_names, distances)
+        out_img = draw_outputs(out_img, valid_boxes, valid_scores, valid_classes, valid_nums, class_names, distances)
 
         # Čuvanje rezultata u datoteku
-        cv2.imwrite(output_path + name[:-4] + '_L.png', left_img)
-        cv2.imwrite(output_path + name[:-4] + '_R.png', right_img)
+        #cv2.imwrite(output_path + name[:-4] + '_L.png', l_img)
+        #cv2.imwrite(output_path + name[:-4] + '_R.png', r_img)
         cv2.imwrite(output_path + name[:-4] + '_OUT.png', out_img)
+
 
 if __name__ == '__main__':
     main()
