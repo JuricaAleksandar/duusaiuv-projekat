@@ -133,6 +133,7 @@ def draw_outputs(img, boxes, objectness, classes, nums, class_names):
                           (x1y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
 
         img = cv2.putText(img, 'Ind: {}'.format(str(i)), (x1y2), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
+        #img = cv2.putText(img, '{:.4f} {:.4f}'.format(boxes[i][0], boxes[i][2]), (x1y2 + (0, 40)), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
 
     return img
 
@@ -150,6 +151,8 @@ def draw_outputs_with_distance(img, boxes, objectness, classes, nums, class_name
 
     #Povratna vrednost:
     #    img: Izlazna slika
+
+    out_img = img
 
     for i in range(nums):
         x1y1 = tuple((boxes[i][0:2] * [img.shape[1],img.shape[0]]).astype(np.int32))
