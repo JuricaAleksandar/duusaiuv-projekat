@@ -168,6 +168,6 @@ def draw_outputs_with_distance(img, boxes, objectness, classes, nums, class_name
             class_names[int(classes[i])], objectness[i]),
                           (x1y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
 
-        out_img = cv2.putText(out_img, '{:.2f}m Ind: {}'.format(
-            distances[i], str(i)), (x1y2), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
+        out_img = cv2.putText(out_img, '{:.2f}m'.format(
+            distances[i]), (x1y2), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
     return out_img

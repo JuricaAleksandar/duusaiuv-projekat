@@ -27,6 +27,8 @@ camera_distance = 0.54
 pitch = 0.00000586
 
 y_threshold = 20
+h_threshold = 30
+x_threshold = 80
 
 def preprocess_and_detect(model, img_path):
     img = cv2.imread(img_path)
@@ -71,7 +73,7 @@ def main():
         os.remove(os.path.join(output_path, img))
     # Učitavanje ulazne slike i predobrada u format koji očekuje model
     img_names = os.listdir(left_img_path)
-    for name in [img_names[120]]:
+    for name in img_names[270:299]:
         boxes_l , scores_l, left_classes, nums_l, left_img, left_obj_pos, l_obj_height = preprocess_and_detect(model, os.path.join(left_img_path, name))
         boxes_r, scores_r, right_classes, nums_r, right_img, right_obj_pos, r_obj_height = preprocess_and_detect(model, os.path.join(right_img_path, name))
         print('\nDetektovano:')
@@ -104,8 +106,9 @@ def main():
                 for r_obj_ind in range(nums_r):
                     diff_y = abs(left_obj_pos[l_obj_ind][1] - right_obj_pos[r_obj_ind][1])
                     diff_h = abs(l_obj_height[l_obj_ind] - r_obj_height[r_obj_ind])
+                    diff_x = left_obj_pos[l_obj_ind][0] - right_obj_pos[r_obj_ind][0]
 
-                    if left_classes[l_obj_ind] == right_classes[r_obj_ind] and diff_y < y_threshold and diff_h < y_threshold:
+                    if left_classes[l_obj_ind] == right_classes[r_obj_ind] and diff_y < y_threshold and diff_h < h_threshold and diff_x < x_threshold and diff_x > 0:
                         y_diff_list.append(diff_y)
                         ind_list.append(r_obj_ind)
 
@@ -149,10 +152,9 @@ def main():
         out_img = draw_outputs_with_distance(out_img, valid_boxes, valid_scores, valid_classes, valid_nums, class_names, distances)
 
         # Čuvanje rezultata u datoteku
-        out_file_name = output_path + name
-        cv2.imwrite(output_path + 'L_' + name, left_img)
-        cv2.imwrite(output_path + 'R_' + name, right_img)
-        cv2.imwrite(output_path + 'OUT_' + name, out_img)
+        cv2.imwrite(output_path + name[:-4] + '_L.png', left_img)
+        cv2.imwrite(output_path + name[:-4] + '_R.png', right_img)
+        cv2.imwrite(output_path + name[:-4] + '_OUT.png', out_img)
 
 if __name__ == '__main__':
     main()
