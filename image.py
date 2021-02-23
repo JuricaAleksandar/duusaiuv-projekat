@@ -112,20 +112,14 @@ def main():
 
     img_names = os.listdir(left_img_path)
     for name in img_names:
-        l_boxes, l_scores, l_classes, l_nums, l_img, l_obj_pos, l_obj_height = preprocess_and_detect(model, os.path.join(left_img_path, name))
-        r_boxes, r_scores, r_classes, r_nums, r_img, r_obj_pos, r_obj_height = preprocess_and_detect(model, os.path.join(right_img_path, name))
+        l_boxes, l_scores, l_classes, l_nums, img, l_obj_pos, l_obj_height = preprocess_and_detect(model, os.path.join(left_img_path, name))
+        _, _, r_classes, r_nums, _, r_obj_pos, r_obj_height = preprocess_and_detect(model, os.path.join(right_img_path, name))
 
         valid_boxes = []
         valid_scores = []
         valid_classes = []
         valid_nums = 0
         distances = []
-
-        # Stvaranje kopije slike sa leve kamere
-        out_img = np.copy(l_img)
-
-        #l_img = draw_outputs(l_img, l_boxes, l_scores, l_classes, l_nums, class_names)
-        #r_img = draw_outputs(r_img, r_boxes, r_scores, r_classes, r_nums, class_names)
 
         if (l_nums > 0 and r_nums > 0):
             for l_obj_ind in range(l_nums):
@@ -151,12 +145,10 @@ def main():
                     r_obj_height = np.delete(r_obj_height, match_ind, 0)
                     r_nums -= 1
 
-        out_img = draw_outputs(out_img, valid_boxes, valid_scores, valid_classes, valid_nums, class_names, distances)
+        img = draw_outputs(img, valid_boxes, valid_scores, valid_classes, valid_nums, class_names, distances)
 
         # Čuvanje rezultata u datoteku
-        #cv2.imwrite(output_path + name[:-4] + '_L.png', l_img)
-        #cv2.imwrite(output_path + name[:-4] + '_R.png', r_img)
-        cv2.imwrite(output_path + name[:-4] + '_OUT.png', out_img)
+        cv2.imwrite(output_path + name[:-4] + '_OUT.png', img)
 
 
 if __name__ == '__main__':

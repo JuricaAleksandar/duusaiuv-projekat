@@ -129,13 +129,13 @@ def draw_outputs(img, boxes, objectness, classes, nums, class_names, distances=N
         x1y2 = tuple((boxes[i][0:4:3] * [img.shape[1],img.shape[0]]).astype(np.int32))
 
         if distances is not None:
-            img = cv2.putText(img, '{:.2f}m'.format(
-                distances[i]), (x1y2), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
-
             if distances[i] < 15:
                 img = cv2.rectangle(img, (x1y1), (x2y2), (0,0,255), 4)
             else:
                 img = cv2.rectangle(img, (x1y1), (x2y2), (255,0,0), 2)
+
+            img = cv2.putText(img, '{:.2f}m'.format(
+                distances[i]), (x1y2), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 2)
         else:
             img = cv2.rectangle(img, (x1y1), (x2y2), (255,0,0), 2)
 
